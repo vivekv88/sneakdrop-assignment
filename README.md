@@ -16,7 +16,7 @@ npm run seed
 npm run dev
 ```
 
-The seed command creates the `Afterglow 01` sneaker with 20 pairs and 100 demo users. It prints IDs for the page inputs.
+The seed command creates 20 individually identified `Afterglow 01` sneaker pairs and 100 demo users. It prints all pair IDs and sample user IDs for the page inputs.
 
 Run the concurrency test with:
 
@@ -35,9 +35,9 @@ npm test
 
 ### Buy concurrency
 
-`buyPair` runs in a PostgreSQL serializable transaction. It reserves stock with an atomic conditional update whose predicate includes `availableStock > 0`. Serialization conflicts are retried, and once 20 updates succeed, later predicates no longer match. The hold is created in the same transaction, so a successful response cannot expose an inventory decrement without its corresponding hold. The unique partial index on active holds also prevents a second active hold for one user and sneaker.
+`buyPair` runs in a PostgreSQL transaction for the selected pair. It reserves that pair with an atomic conditional update whose predicate includes `availableStock > 0`. Once a pair is held, later users selecting the same pair enter its FIFO queue. The hold is created in the same transaction, so a successful response cannot expose an inventory decrement without its corresponding hold. The unique partial index on active holds also prevents a second active hold for one user and sneaker.
 
-Queue sequence allocation is stored in PostgreSQL. A production system would use a counter row for high-volume sequence allocation; this assignment uses the last sequence under the same serializable transaction and the unique `(sneakerId, sequenceNumber)` index as its conflict guard.
+Queue sequence allocation is stored independently for each sneaker pair in PostgreSQL. The unique `(sneakerId, sequenceNumber)` index and retry handling prevent duplicate queue positions under concurrent requests.
 
 ### Expiration
 
@@ -49,6 +49,8 @@ For production, replace the polling endpoint with a durable scheduler and retrya
 
 `POST /api/payments/webhook` accepts `PENDING`, `SUCCESS`, and `FAILED` events. `paymentId` and `eventId` are unique. A successful payment atomically changes the still-active, unexpired hold to `CONVERTED`, creates one `Purchase` (unique by `holdId` and `paymentId`), increments the user's completed count, and increments `soldStock`.
 
+The local UI uses `POST /api/payments/fake` as a payment simulator. A hold creates a pending fake payment; clicking `PAY NOW` immediately confirms it, converts the hold, increments `soldStock`, and increments the user's completed purchase count. If the five-minute hold expires first, the pending payment becomes `FAILED`; the pair is returned to stock when there is no queue, or promoted to the next waiting user.
+
 A late success cannot match the active/unexpired hold predicate and is recorded as `EXPIRED`. A payment already marked `SUCCESS` or `EXPIRED` is ignored. `SUCCESS` is terminal, so a later `PENDING` event cannot move it backwards.
 
 ## API
@@ -56,6 +58,7 @@ A late success cannot match the active/unexpired hold predicate and is recorded 
 - `POST /api/drop/buy` with `{ userId, sneakerId }`: returns a hold (`201`) or queue entry (`202`).
 - `GET /api/drop/status?userId=...&sneakerId=...`: returns stock, completed count, hold expiry, and FIFO queue position.
 - `POST /api/payments/webhook`: accepts `{ eventId, paymentId, holdId, userId, status }`.
+- `POST /api/payments/fake`: accepts `{ holdId, userId }` and immediately succeeds for local checkout testing.
 - `POST /api/internal/process-expired-holds`: processes expired holds. Send `x-worker-secret` when `INTERNAL_WORKER_SECRET` is configured.
 
 ## Tests and limitations
