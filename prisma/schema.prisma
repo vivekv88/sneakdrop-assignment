@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum HoldStatus {
+  ACTIVE
+  EXPIRED
+  CONVERTED
+  CANCELLED
+}
+
+enum QueueStatus {
+  WAITING
+  PROMOTED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+model User {
+  id             String        @id @default(cuid())
+  name           String
+  email          String        @unique
+  totalPurchased Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  holds          Hold[]
+  queueEntries   QueueEntry[]
+  payments       Payment[]
+  purchases      Purchase[]
+}
+
+model Sneaker {
+  id             String        @id @default(cuid())
+  name           String        @unique
+  totalStock     Int
+  availableStock Int
+  soldStock      Int
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  holds          Hold[]
+  queueEntries   QueueEntry[]
+  purchases      Purchase[]
+}
+
+model Hold {
+  id         String     @id @default(cuid())
+  userId     String
+  sneakerId  String
+  status     HoldStatus
+  expiresAt  DateTime
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sneaker    Sneaker    @relation(fields: [sneakerId], references: [id], onDelete: Cascade)
+  payment    Payment?
+  purchase   Purchase?
+
+  @@index([status, expiresAt])
+  @@index([userId, sneakerId, status])
+}
+
+model QueueEntry {
+  id             String      @id @default(cuid())
+  userId         String
+  sneakerId      String
+  status         QueueStatus
+  sequenceNumber Int
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sneaker        Sneaker     @relation(fields: [sneakerId], references: [id], onDelete: Cascade)
+
+  @@unique([sneakerId, sequenceNumber])
+  @@index([userId, sneakerId, status])
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  paymentId String        @unique
+  eventId   String        @unique
+  userId    String
+  holdId    String        @unique
+  status    PaymentStatus
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hold     Hold          @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  purchase Purchase?
+}
+
+model Purchase {
+  id        String   @id @default(cuid())
+  userId    String
+  sneakerId String
+  holdId    String   @unique
+  paymentId String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sneaker  Sneaker  @relation(fields: [sneakerId], references: [id], onDelete: Cascade)
+  hold     Hold     @relation(fields: [holdId], references: [id], onDelete: Cascade)
+  payment  Payment  @relation(fields: [paymentId], references: [paymentId], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
